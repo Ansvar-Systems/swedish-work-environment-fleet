@@ -1,0 +1,63 @@
+# Swedish Work Environment Fleet — Data Sources
+# Each entry describes an agency whose regulations are ingested by one MCP package.
+
+sources:
+  - agency: Arbetsmiljoverket (AV)
+    gazette_series: AFS
+    url: https://www.av.se/arbetsmiljoarbete-och-inspektioner/publikationer/foreskrifter/
+    license: PSI / Oppen data
+    license_note: All AV regulations are published under Swedish PSI re-use rules.
+    content: >-
+      Occupational safety and health regulations covering chemical hazards,
+      asbestos, machinery safety, ergonomics, construction site safety,
+      workplace ventilation, organisational and social work environment.
+    refresh_schedule: Monthly, 1st of each month at 03:00 UTC
+
+  - agency: Boverket
+    gazette_series: BFS
+    url: https://www.boverket.se/sv/lag--ratt/forfattningssamling/
+    license: PSI / Oppen data
+    license_note: >-
+      Boverket's own regulations are open data. Referenced SIS standards
+      (e.g. SS-EN 12464-1 for lighting) are copyrighted by SIS and excluded —
+      the database stores reference_only stubs for those.
+    content: >-
+      Building codes (BBR), construction product regulations, planning and
+      building permit rules, accessibility standards, energy performance
+      requirements.
+    refresh_schedule: Monthly, 1st of each month at 03:00 UTC
+
+  - agency: Myndigheten for samhallsskydd och beredskap (MSB)
+    gazette_series: MSBFS
+    url: https://www.msb.se/sv/regler/forfattningar/
+    license: PSI / Oppen data
+    license_note: All MSB regulations are published under Swedish PSI re-use rules.
+    content: >-
+      Fire protection, hazardous materials transport (ADR/RID), IT security
+      for essential services and critical infrastructure, civil protection
+      and crisis preparedness regulations.
+    refresh_schedule: Monthly, 1st of each month at 03:00 UTC
+
+  - agency: Folkhalsomyndigheten (FoHM)
+    gazette_series: FoHMFS
+    url: https://www.folkhalsomyndigheten.se/publicerat-material/foreskrifter/
+    license: PSI / Oppen data
+    license_note: All FoHM regulations are published under Swedish PSI re-use rules.
+    content: >-
+      Indoor air quality, drinking water quality, noise limits, hygiene in
+      public spaces, infection control, environmental health requirements.
+    refresh_schedule: Monthly, 1st of each month at 03:00 UTC
+
+  - agency: Stralsakerhetsmyndigheten (SSM)
+    gazette_series: SSMFS
+    url: https://www.stralsakerhetsmyndigheten.se/publikationer/foreskrifter/
+    license: PSI / Oppen data
+    license_note: >-
+      SSM's own regulations are open data. Referenced SIS standards for
+      radiation measurement and nuclear safety are copyrighted by SIS and
+      excluded — the database stores reference_only stubs for those.
+    content: >-
+      Radiation protection, nuclear facility safety, medical radiation
+      equipment, radioactive waste management, transport of radioactive
+      materials.
+    refresh_schedule: Monthly, 1st of each month at 03:00 UTC
