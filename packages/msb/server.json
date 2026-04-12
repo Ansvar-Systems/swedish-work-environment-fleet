@@ -1,0 +1,10 @@
+{
+  "name": "io.github.Ansvar-Systems/swedish-emergency-preparedness",
+  "description": "Swedish emergency preparedness and civil protection regulations from MSB (MSBFS). Covers fire protection, hazardous materials transport (ADR), IT security for critical infrastructure.",
+  "repository": "https://github.com/Ansvar-Systems/swedish-work-environment-fleet",
+  "version": "0.1.0",
+  "remote": {
+    "transportType": "streamable-http",
+    "url": "https://mcp.ansvar.eu/swedish-emergency-preparedness/mcp"
+  }
+}

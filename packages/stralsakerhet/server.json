@@ -1,0 +1,10 @@
+{
+  "name": "io.github.Ansvar-Systems/swedish-radiation-protection",
+  "description": "Swedish radiation protection and nuclear safety regulations from Stralsakerhetsmyndigheten (SSMFS). Covers radiation protection, nuclear facility safety, medical radiation equipment, radioactive waste.",
+  "repository": "https://github.com/Ansvar-Systems/swedish-work-environment-fleet",
+  "version": "0.1.0",
+  "remote": {
+    "transportType": "streamable-http",
+    "url": "https://mcp.ansvar.eu/swedish-radiation-protection/mcp"
+  }
+}
