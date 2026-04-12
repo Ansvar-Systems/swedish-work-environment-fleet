@@ -1,0 +1,35 @@
+name: Check Freshness
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  freshness:
+    name: Freshness ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - arbetsmiljo
+          - boverket
+          - msb
+          - folkhalsomyndigheten
+          - stralsakerhet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Build core
+        run: npm run build --workspace=packages/core
+
+      - name: Check freshness
+        env:
+          MAX_STALENESS_DAYS: '45'
+        run: npm run freshness:check --workspace=packages/${{ matrix.package }}

@@ -1,0 +1,76 @@
+name: Monthly Ingest
+
+on:
+  schedule:
+    - cron: '0 3 1 * *'
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Package to ingest (or "all")'
+        required: false
+        default: all
+      force:
+        description: 'Force full re-ingest'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  ingest:
+    name: Ingest ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'schedule'
+      || inputs.package == 'all'
+      || inputs.package == matrix.package
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - arbetsmiljo
+          - boverket
+          - msb
+          - folkhalsomyndigheten
+          - stralsakerhet
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Build core
+        run: npm run build --workspace=packages/core
+
+      - name: Run ingest
+        run: npm run ingest --workspace=packages/${{ matrix.package }} -- ${{ inputs.force && '--force' || '' }}
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet packages/${{ matrix.package }}/data/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create PR
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="ingest/${{ matrix.package }}-$(date +%Y%m%d)"
+          git checkout -b "$BRANCH"
+          git add packages/${{ matrix.package }}/data/
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "data(${{ matrix.package }}): monthly ingest $(date +%Y-%m-%d)"
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "data(${{ matrix.package }}): monthly ingest $(date +%Y-%m-%d)" \
+            --body "Automated monthly ingest for \`${{ matrix.package }}\`." \
+            --base main

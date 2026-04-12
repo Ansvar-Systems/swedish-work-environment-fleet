@@ -1,0 +1,38 @@
+name: Publish to npm
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    name: Publish ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - arbetsmiljo
+          - boverket
+          - msb
+          - folkhalsomyndigheten
+          - stralsakerhet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+
+      - name: Build core
+        run: npm run build --workspace=packages/core
+
+      - name: Build package
+        run: npm run build --workspace=packages/${{ matrix.package }}
+
+      - name: Publish
+        run: npm publish --access public --workspace=packages/${{ matrix.package }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

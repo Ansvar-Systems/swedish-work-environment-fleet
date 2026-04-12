@@ -1,0 +1,47 @@
+name: GHCR Build
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: arbetsmiljo
+            image: swedish-work-environment-mcp
+          - package: boverket
+            image: swedish-building-code-mcp
+          - package: msb
+            image: swedish-emergency-preparedness-mcp
+          - package: folkhalsomyndigheten
+            image: swedish-public-health-mcp
+          - package: stralsakerhet
+            image: swedish-radiation-protection-mcp
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/${{ matrix.package }}/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:latest
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:sha-${{ github.sha }}
