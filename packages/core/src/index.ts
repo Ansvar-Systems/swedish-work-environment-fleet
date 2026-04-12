@@ -37,3 +37,10 @@ export { buildRegulationCitation, buildSectionCitation } from './citation.js';
 export { TOOL_DEFINITIONS, createToolHandlers } from './tools.js';
 
 export { startHttpServer } from './http-server.js';
+
+export {
+  parseRegulationPage,
+  extractDefinitions,
+  extractCrossReferences,
+  stripHtml,
+} from './scraper.js';
