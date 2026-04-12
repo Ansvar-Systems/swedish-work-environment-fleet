@@ -10,7 +10,7 @@ export const CONFIG: AgencyConfig = {
     'Swedish public health regulations from Folkhalsomyndigheten (FoHMFS). ' +
     'Covers indoor air quality, drinking water, noise limits, hygiene in public spaces, infection control.',
   indexUrl:
-    'https://www.folkhalsomyndigheten.se/publicerat-material/foreskrifter/',
+    'https://www.folkhalsomyndigheten.se/publikationer-och-material/foreskrifter-och-allmanna-rad/foreskrifter-i-nummerordning/',
   sourceUrl: 'https://www.folkhalsomyndigheten.se/',
   defaultLicense: 'psi_oppen_data',
   sfsBasis: 'SFS 2010:1011',

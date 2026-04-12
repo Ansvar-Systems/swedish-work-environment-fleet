@@ -62,7 +62,13 @@ function saveHashes(hashes: Record<string, string>): void {
 }
 
 async function fetchPage(url: string): Promise<string> {
-  const res = await fetch(url);
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'AnsvarMCP/0.1 (https://ansvar.eu; data-ingestion)',
+      'Accept': 'text/html,application/xhtml+xml',
+      'Accept-Language': 'sv,en;q=0.5',
+    },
+  });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} fetching ${url}`);
   }
@@ -91,12 +97,13 @@ function parseIndexPage(html: string): RegulationLink[] {
     const href = match[1];
     const text = stripHtml(match[2]);
 
-    // Look for FoHMFS YYYY:N pattern
-    const fohmfsMatch = text.match(/FoHMFS\s+(\d{4}:\d+)/i);
+    // Look for HSLF-FS, FoHMFS, or FHIFS YYYY:N pattern
+    const fohmfsMatch = text.match(/(HSLF-FS|FoHMFS|FHIFS)\s+(\d{4}:\d+)/i);
     if (!fohmfsMatch) continue;
 
-    const number = fohmfsMatch[1];
-    const id = `FoHMFS-${number.replace(':', '-')}`;
+    const series = fohmfsMatch[1].toUpperCase();
+    const number = fohmfsMatch[2];
+    const id = `${series}-${number.replace(':', '-')}`;
 
     if (seen.has(id)) continue;
     seen.add(id);
@@ -105,7 +112,7 @@ function parseIndexPage(html: string): RegulationLink[] {
       ? href
       : new URL(href, CONFIG.indexUrl).toString();
 
-    const titleMatch = text.match(/FoHMFS\s+\d{4}:\d+[,\s]*[-–—]\s*(.+)/i);
+    const titleMatch = text.match(/(?:HSLF-FS|FoHMFS|FHIFS)\s+\d{4}:\d+[,\s]*[-–—]\s*(.+)/i);
     const title = titleMatch ? titleMatch[1].trim() : text.trim();
 
     links.push({ id, number, url: absoluteUrl, title });
@@ -252,17 +259,19 @@ async function main(): Promise<void> {
       }
       totalDefinitions += defs.length;
 
-      const xrefs = extractCrossReferences(html, link.id);
-      for (const xref of xrefs) {
-        const firstSectionId = sections.length > 0 ? sections[0].id : link.id;
-        insertXref.run({
-          source_section_id: firstSectionId,
-          target_type: xref.target_type,
-          target_id: xref.target_id,
-          target_label: null,
-        });
+      // Only extract and insert cross-refs if we have sections
+      if (sections.length > 0) {
+        const xrefs = extractCrossReferences(html, link.id);
+        for (const xref of xrefs) {
+          insertXref.run({
+            source_section_id: sections[0].id,
+            target_type: xref.target_type,
+            target_id: xref.target_id,
+            target_label: null,
+          });
+        }
+        totalCrossRefs += xrefs.length;
       }
-      totalCrossRefs += xrefs.length;
     }
 
     db.exec(`

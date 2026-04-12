@@ -10,7 +10,7 @@ export const CONFIG: AgencyConfig = {
     'Swedish radiation protection and nuclear safety regulations from Stralsakerhetsmyndigheten (SSMFS). ' +
     'Covers radiation protection, nuclear facility safety, medical radiation equipment, radioactive waste.',
   indexUrl:
-    'https://www.stralsakerhetsmyndigheten.se/publikationer/foreskrifter/',
+    'https://www.stralsakerhetsmyndigheten.se/regler/foreskrifter/',
   sourceUrl: 'https://www.stralsakerhetsmyndigheten.se/',
   defaultLicense: 'psi_oppen_data',
   sfsBasis: 'SFS 2018:1174',

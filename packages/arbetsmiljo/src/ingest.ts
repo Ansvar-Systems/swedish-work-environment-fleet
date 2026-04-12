@@ -62,7 +62,13 @@ function saveHashes(hashes: Record<string, string>): void {
 }
 
 async function fetchPage(url: string): Promise<string> {
-  const res = await fetch(url);
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'AnsvarMCP/0.1 (https://ansvar.eu; data-ingestion)',
+      'Accept': 'text/html,application/xhtml+xml',
+      'Accept-Language': 'sv,en;q=0.5',
+    },
+  });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} fetching ${url}`);
   }
@@ -261,19 +267,19 @@ async function main(): Promise<void> {
       }
       totalDefinitions += defs.length;
 
-      // Extract cross-references
-      const xrefs = extractCrossReferences(html, link.id);
-      for (const xref of xrefs) {
-        // Attach to first section of the regulation if available
-        const firstSectionId = sections.length > 0 ? sections[0].id : link.id;
-        insertXref.run({
-          source_section_id: firstSectionId,
-          target_type: xref.target_type,
-          target_id: xref.target_id,
-          target_label: null,
-        });
+      // Only extract and insert cross-refs if we have sections
+      if (sections.length > 0) {
+        const xrefs = extractCrossReferences(html, link.id);
+        for (const xref of xrefs) {
+          insertXref.run({
+            source_section_id: sections[0].id,
+            target_type: xref.target_type,
+            target_id: xref.target_id,
+            target_label: null,
+          });
+        }
+        totalCrossRefs += xrefs.length;
       }
-      totalCrossRefs += xrefs.length;
     }
 
     // Build FTS5 index
