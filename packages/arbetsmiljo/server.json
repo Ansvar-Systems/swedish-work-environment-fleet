@@ -1,0 +1,10 @@
+{
+  "name": "io.github.Ansvar-Systems/swedish-work-environment",
+  "description": "Swedish work environment regulations from Arbetsmiljoverket (AV). Covers occupational safety, asbestos, chemical hazards, machinery, ergonomics, construction safety.",
+  "repository": "https://github.com/Ansvar-Systems/swedish-work-environment-fleet",
+  "version": "0.1.0",
+  "remote": {
+    "transportType": "streamable-http",
+    "url": "https://mcp.ansvar.eu/swedish-work-environment/mcp"
+  }
+}

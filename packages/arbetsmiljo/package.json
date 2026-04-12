@@ -1,24 +1,23 @@
 {
-  "name": "@ansvar/swe-fleet-core",
+  "name": "@ansvar/swedish-work-environment-mcp",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    }
-  },
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src/ tests/",
+    "start": "node dist/index.js",
+    "start:http": "node dist/http-server.js",
+    "ingest": "tsx src/ingest.ts",
+    "build:db": "tsx scripts/build-db.ts",
+    "freshness:check": "tsx scripts/check-freshness.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ansvar/swe-fleet-core": "*",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "better-sqlite3": "^11.0.0",
     "zod": "^3.23.0"
