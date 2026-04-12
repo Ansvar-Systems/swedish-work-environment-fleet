@@ -1,0 +1,21 @@
+{
+  "name": "swedish-work-environment-fleet",
+  "private": true,
+  "workspaces": [
+    "packages/core",
+    "packages/arbetsmiljo",
+    "packages/boverket",
+    "packages/msb",
+    "packages/folkhalsomyndigheten",
+    "packages/stralsakerhet"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces",
+    "lint": "npm run lint --workspaces",
+    "typecheck": "npm run typecheck --workspaces"
+  }
+}
