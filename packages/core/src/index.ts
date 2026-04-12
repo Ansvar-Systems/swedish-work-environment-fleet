@@ -33,3 +33,7 @@ export { validateJurisdiction } from './jurisdiction.js';
 
 export type { CitationMetadata } from './citation.js';
 export { buildRegulationCitation, buildSectionCitation } from './citation.js';
+
+export { TOOL_DEFINITIONS, createToolHandlers } from './tools.js';
+
+export { startHttpServer } from './http-server.js';
