@@ -20,7 +20,7 @@ import {
   extractCrossReferences,
   stripHtml,
 } from '@ansvar/swe-fleet-core';
-import { CONFIG } from './config.js';
+import { CONFIG, BOVERKET_API_BASE, BOVERKET_API_KEY } from './config.js';
 
 // ---------------------------------------------------------------------------
 // CLI flags
@@ -76,7 +76,7 @@ async function fetchPage(url: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Index page parsing — extract links to individual BFS regulations
+// Types
 // ---------------------------------------------------------------------------
 
 interface RegulationLink {
@@ -84,8 +84,110 @@ interface RegulationLink {
   number: string;
   url: string;
   title: string;
+  status?: string;
+  issuedDate?: string | null;
+  effectiveDate?: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Boverket REST API ingestion (preferred path)
+// ---------------------------------------------------------------------------
+
+/** Metadata object returned by GET /forfattningar */
+interface BoverketApiRegulation {
+  id: string;
+  forfattning: string;
+  grundforfattning?: string;
+  typ: string;
+  titel: string;
+  forkortning?: string;
+  beslutad?: string;
+  trycklovad?: string;
+  ikraft?: string;
+  upphavd?: string | null;
+  dokumentlank?: string;
+  apiHarFulltext?: boolean;
+  apiHarAndringar?: boolean;
+}
+
+/** Structured content section from GET /forfattningar/{id}/innehall */
+interface BoverketApiSection {
+  kategori: string;
+  egenskaper?: {
+    paragraf?: string;
+    rubrik?: string;
+    niva?: number;
+  };
+  block?: Array<{
+    typ: string;
+    format: string;
+    data: string;
+  }>;
+  underavsnitt?: BoverketApiSection[];
+}
+
+async function fetchApiJson<T>(path: string): Promise<T> {
+  const url = `${BOVERKET_API_BASE}${path}`;
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'AnsvarMCP/0.1 (https://ansvar.eu; data-ingestion)',
+      'Accept': 'application/json',
+      'Ocp-Apim-Subscription-Key': BOVERKET_API_KEY,
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`API ${res.status} fetching ${url}: ${await res.text()}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+async function fetchRegulationListFromApi(): Promise<RegulationLink[]> {
+  // Fetch in-force grundforfattning only (exclude repealed)
+  const regs = await fetchApiJson<BoverketApiRegulation[]>(
+    '/forfattningar?upphavd=nej',
+  );
+
+  return regs.map((r) => ({
+    id: r.id,
+    number: r.forfattning,
+    url: r.dokumentlank ?? `${CONFIG.indexUrl}`,
+    title: r.titel,
+    status: r.upphavd ? 'repealed' : 'in_force',
+    issuedDate: r.beslutad ?? null,
+    effectiveDate: r.ikraft ?? null,
+  }));
+}
+
+async function fetchRegulationContentFromApi(
+  regId: string,
+): Promise<string> {
+  // Fetch HTML content for structured parsing
+  const res = await fetch(
+    `${BOVERKET_API_BASE}/forfattningar/${regId}/innehall/html`,
+    {
+      headers: {
+        'User-Agent': 'AnsvarMCP/0.1 (https://ansvar.eu; data-ingestion)',
+        'Accept': 'text/html',
+        'Ocp-Apim-Subscription-Key': BOVERKET_API_KEY,
+      },
+    },
+  );
+  if (!res.ok) {
+    // If HTML endpoint fails (e.g. PDF-only regulation), return empty
+    return '';
+  }
+  return res.text();
+}
+
+// ---------------------------------------------------------------------------
+// Legacy HTML scrape fallback (no longer works — Blazor Server app)
+// ---------------------------------------------------------------------------
+
+/**
+ * @deprecated Boverket moved to a Blazor Server app in 2025.
+ * The HTML listing page no longer contains static content.
+ * This function is kept for reference but will return an empty array.
+ */
 function parseIndexPage(html: string): RegulationLink[] {
   const links: RegulationLink[] = [];
   const seen = new Set<string>();
@@ -127,13 +229,40 @@ function parseIndexPage(html: string): RegulationLink[] {
 async function main(): Promise<void> {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 
-  console.log(`Fetching index: ${CONFIG.indexUrl}`);
-  const indexHtml = await fetchPage(CONFIG.indexUrl);
-  const regulationLinks = parseIndexPage(indexHtml);
-  console.log(`Found ${regulationLinks.length} regulations on index page.`);
+  let regulationLinks: RegulationLink[];
+  let useApi = false;
+
+  // -----------------------------------------------------------------------
+  // Choose ingestion path: API (preferred) or HTML scrape (legacy fallback)
+  // -----------------------------------------------------------------------
+  if (BOVERKET_API_KEY) {
+    console.log('BOVERKET_API_KEY set — using Boverket REST API.');
+    useApi = true;
+    regulationLinks = await fetchRegulationListFromApi();
+    console.log(`API returned ${regulationLinks.length} regulations.`);
+  } else {
+    console.log(
+      'BOVERKET_API_KEY not set — attempting HTML scrape (legacy path).',
+    );
+    console.log(`Fetching index: ${CONFIG.indexUrl}`);
+    const indexHtml = await fetchPage(CONFIG.indexUrl);
+    regulationLinks = parseIndexPage(indexHtml);
+    console.log(`Found ${regulationLinks.length} regulations on index page.`);
+  }
 
   if (regulationLinks.length === 0) {
-    console.error('No regulations found on index page — aborting.');
+    console.error(
+      'No regulations found.\n' +
+        '\n' +
+        'Boverket moved their regulation listing to a Blazor Server app at\n' +
+        'forfattningssamling.boverket.se which cannot be scraped with HTTP fetch.\n' +
+        '\n' +
+        'To ingest BFS regulations, register for a free API key at:\n' +
+        '  https://api-portal.boverket.se/\n' +
+        '\n' +
+        'Then set BOVERKET_API_KEY in your environment and re-run.\n' +
+        'See config.ts for API documentation links.',
+    );
     process.exit(1);
   }
 
@@ -151,9 +280,11 @@ async function main(): Promise<void> {
   const pages: Array<{ link: RegulationLink; html: string; changed: boolean }> = [];
 
   for (const link of regulationLinks) {
-    console.log(`  Fetching ${link.id}: ${link.url}`);
+    console.log(`  Fetching ${link.id}: ${useApi ? '(API)' : link.url}`);
     try {
-      const html = await fetchPage(link.url);
+      const html = useApi
+        ? await fetchRegulationContentFromApi(link.id)
+        : await fetchPage(link.url);
       const hash = sha256(html);
       newHashes[link.id] = hash;
 
@@ -228,9 +359,9 @@ async function main(): Promise<void> {
         number: link.number,
         title: link.title,
         subject_area: null,
-        status: 'in_force',
-        issued_date: null,
-        effective_date: null,
+        status: link.status ?? 'in_force',
+        issued_date: link.issuedDate ?? null,
+        effective_date: link.effectiveDate ?? null,
         repealed_date: null,
         amends: null,
         amended_by: null,

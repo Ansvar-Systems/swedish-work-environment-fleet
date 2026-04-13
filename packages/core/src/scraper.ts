@@ -13,11 +13,13 @@ const ENTITY_MAP: Record<string, string> = {
   '&nbsp;': ' ',
 };
 
-/** Remove HTML tags and decode common entities. */
+/** Remove HTML tags and decode common entities (including numeric). */
 export function stripHtml(html: string): string {
   return html
     .replace(/<[^>]*>/g, '')
     .replace(/&amp;|&lt;|&gt;|&quot;|&#39;|&nbsp;/g, (match) => ENTITY_MAP[match] ?? match)
+    .replace(/&#x([0-9a-fA-F]+);/g, (_m, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_m, dec) => String.fromCodePoint(parseInt(dec, 10)))
     .trim();
 }
 

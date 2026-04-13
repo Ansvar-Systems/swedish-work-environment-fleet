@@ -20,7 +20,7 @@ import {
   extractCrossReferences,
   stripHtml,
 } from '@ansvar/swe-fleet-core';
-import { CONFIG } from './config.js';
+import { CONFIG, GAZETTE_SERIES } from './config.js';
 
 // ---------------------------------------------------------------------------
 // CLI flags
@@ -76,48 +76,112 @@ async function fetchPage(url: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Index page parsing — extract links to individual MSBFS regulations
+// Index page parsing — extract links to individual MSBFS/MCFFS regulations
 // ---------------------------------------------------------------------------
 
 interface RegulationLink {
   id: string;
   number: string;
+  gazette: string;
   url: string;
   title: string;
 }
 
-function parseIndexPage(html: string): RegulationLink[] {
+/**
+ * Parse a single page of the MCF regulation listing.
+ *
+ * MCF uses "constitution-list-card" blocks with:
+ *   - a.constitution-list-card-link  → detail page URL + title text
+ *   - p.constitution-list-card-number → "Författningsnummer: MSBFS 2025:5"
+ *
+ * Falls back to generic <a> scanning if no card blocks are found.
+ */
+function parseIndexPage(html: string, baseUrl: string): RegulationLink[] {
   const links: RegulationLink[] = [];
   const seen = new Set<string>();
 
-  const linkRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  // Pattern that matches both MSBFS and MCFFS references
+  const gazettePattern = /((?:MSBFS|MCFFS))\s+(\d{4}:\d+)/gi;
+
+  // Primary: parse constitution-list-card-link anchors (most specific)
+  const cardLinkRegex =
+    /<a[^>]+class="constitution-list-card-link"[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let match: RegExpExecArray | null;
 
-  while ((match = linkRegex.exec(html)) !== null) {
+  while ((match = cardLinkRegex.exec(html)) !== null) {
     const href = match[1];
-    const text = stripHtml(match[2]);
+    const text = stripHtml(match[2]).trim();
 
-    // Look for MSBFS YYYY:N pattern
-    const msbfsMatch = text.match(/MSBFS\s+(\d{4}:\d+)/i);
-    if (!msbfsMatch) continue;
+    const gazetteMatch = gazettePattern.exec(text);
+    gazettePattern.lastIndex = 0; // reset for next iteration
+    if (!gazetteMatch) continue;
 
-    const number = msbfsMatch[1];
-    const id = `MSBFS-${number.replace(':', '-')}`;
+    const gazette = gazetteMatch[1].toUpperCase();
+    const number = gazetteMatch[2];
+    const id = `${gazette}-${number.replace(':', '-')}`;
 
     if (seen.has(id)) continue;
     seen.add(id);
 
     const absoluteUrl = href.startsWith('http')
       ? href
-      : new URL(href, CONFIG.indexUrl).toString();
+      : new URL(href, baseUrl).toString();
 
-    const titleMatch = text.match(/MSBFS\s+\d{4}:\d+[,\s]*[-–—]\s*(.+)/i);
-    const title = titleMatch ? titleMatch[1].trim() : text.trim();
+    // Title is the text after the "MSBFS YYYY:N " prefix
+    const titleMatch = text.match(
+      /(?:MSBFS|MCFFS)\s+\d{4}:\d+\s+(.*)/i,
+    );
+    const title = titleMatch ? titleMatch[1].trim() : text;
 
-    links.push({ id, number, url: absoluteUrl, title });
+    links.push({ id, number, gazette, url: absoluteUrl, title });
+  }
+
+  // Fallback: scan all <a> tags if card parsing found nothing
+  if (links.length === 0) {
+    const linkRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    while ((match = linkRegex.exec(html)) !== null) {
+      const href = match[1];
+      const text = stripHtml(match[2]);
+
+      const gazetteMatch = gazettePattern.exec(text);
+      gazettePattern.lastIndex = 0;
+      if (!gazetteMatch) continue;
+
+      const gazette = gazetteMatch[1].toUpperCase();
+      const number = gazetteMatch[2];
+      const id = `${gazette}-${number.replace(':', '-')}`;
+
+      if (seen.has(id)) continue;
+      seen.add(id);
+
+      const absoluteUrl = href.startsWith('http')
+        ? href
+        : new URL(href, baseUrl).toString();
+
+      const titleMatch = text.match(
+        /(?:MSBFS|MCFFS)\s+\d{4}:\d+[,\s]*[-–—]\s*(.+)/i,
+      );
+      const title = titleMatch ? titleMatch[1].trim() : text.trim();
+
+      links.push({ id, number, gazette, url: absoluteUrl, title });
+    }
   }
 
   return links;
+}
+
+/**
+ * Detect total number of paginated pages from the MCF listing HTML.
+ * Looks for `?selectedpage=N` links in the pagination block.
+ */
+function detectPageCount(html: string): number {
+  const pageNums: number[] = [];
+  const pageRegex = /[?&]selectedpage=(\d+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = pageRegex.exec(html)) !== null) {
+    pageNums.push(parseInt(m[1], 10));
+  }
+  return pageNums.length > 0 ? Math.max(...pageNums) : 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,10 +191,36 @@ function parseIndexPage(html: string): RegulationLink[] {
 async function main(): Promise<void> {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 
-  console.log(`Fetching index: ${CONFIG.indexUrl}`);
-  const indexHtml = await fetchPage(CONFIG.indexUrl);
-  const regulationLinks = parseIndexPage(indexHtml);
-  console.log(`Found ${regulationLinks.length} regulations on index page.`);
+  // -----------------------------------------------------------------------
+  // Fetch all pages of the regulation listing (MCF uses pagination)
+  // -----------------------------------------------------------------------
+  console.log(`Fetching index page 1: ${CONFIG.indexUrl}`);
+  const firstPageHtml = await fetchPage(CONFIG.indexUrl);
+  const totalPages = detectPageCount(firstPageHtml);
+  console.log(`Detected ${totalPages} index pages.`);
+
+  const regulationLinks: RegulationLink[] = [
+    ...parseIndexPage(firstPageHtml, CONFIG.indexUrl),
+  ];
+
+  for (let page = 2; page <= totalPages; page++) {
+    const pageUrl = `${CONFIG.indexUrl}?selectedpage=${page}`;
+    console.log(`Fetching index page ${page}: ${pageUrl}`);
+    const pageHtml = await fetchPage(pageUrl);
+    regulationLinks.push(...parseIndexPage(pageHtml, pageUrl));
+  }
+
+  // Deduplicate (same regulation might appear on navigation links)
+  const seen = new Set<string>();
+  const deduped = regulationLinks.filter((link) => {
+    if (seen.has(link.id)) return false;
+    seen.add(link.id);
+    return true;
+  });
+  regulationLinks.length = 0;
+  regulationLinks.push(...deduped);
+
+  console.log(`Found ${regulationLinks.length} regulations across ${totalPages} pages.`);
 
   if (regulationLinks.length === 0) {
     console.error('No regulations found on index page — aborting.');
@@ -224,7 +314,7 @@ async function main(): Promise<void> {
       insertReg.run({
         id: link.id,
         agency: CONFIG.agency,
-        gazette_series: CONFIG.gazette,
+        gazette_series: link.gazette,
         number: link.number,
         title: link.title,
         subject_area: null,
