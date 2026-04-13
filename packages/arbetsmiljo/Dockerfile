@@ -5,45 +5,42 @@ RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt
 
 WORKDIR /build
 
-# Copy workspace root package.json + lockfile
-COPY package.json package-lock.json* ./
-
-# Copy package.json files for dependency resolution
+# Copy package files for dependency resolution
+COPY package.json package-lock.json ./
 COPY packages/core/package.json packages/core/package.json
 COPY packages/arbetsmiljo/package.json packages/arbetsmiljo/package.json
 
-# Install all workspace dependencies
-RUN npm install --workspace=packages/core --workspace=packages/arbetsmiljo
+# Install all dependencies (hoisted to root node_modules)
+RUN npm ci
 
-# Copy source
+# Copy source and build
 COPY tsconfig.base.json ./
 COPY packages/core/ packages/core/
-COPY packages/arbetsmiljo/ packages/arbetsmiljo/
+COPY packages/arbetsmiljo/tsconfig.json packages/arbetsmiljo/tsconfig.json
+COPY packages/arbetsmiljo/src/ packages/arbetsmiljo/src/
 
-# Build core first, then agency package
-RUN npm run build --workspace=packages/core && \
-    npm run build --workspace=packages/arbetsmiljo
+RUN npm run build -w packages/core && npm run build -w packages/arbetsmiljo
 
 # ---------- production ----------
 FROM node:20-slim
 
+RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 RUN groupadd -r nodejs && useradd -r -g nodejs nodejs
 
 WORKDIR /app
 
+# Install production dependencies
+COPY package.json package-lock.json ./
+COPY packages/core/package.json packages/core/package.json
+COPY packages/arbetsmiljo/package.json packages/arbetsmiljo/package.json
+RUN npm ci --omit=dev && npm cache clean --force && \
+    apt-get purge -y python3 make g++ && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
 # Copy built output
 COPY --from=builder /build/packages/core/dist/ packages/core/dist/
-COPY --from=builder /build/packages/core/package.json packages/core/package.json
 COPY --from=builder /build/packages/arbetsmiljo/dist/ packages/arbetsmiljo/dist/
-COPY --from=builder /build/packages/arbetsmiljo/package.json packages/arbetsmiljo/package.json
 
-# Copy workspace root
-COPY --from=builder /build/package.json ./
-COPY --from=builder /build/node_modules/ node_modules/
-COPY --from=builder /build/packages/core/node_modules/ packages/core/node_modules/
-COPY --from=builder /build/packages/arbetsmiljo/node_modules/ packages/arbetsmiljo/node_modules/
-
-# Copy data directory (database)
+# Copy data (database built during CI ingestion step)
 COPY packages/arbetsmiljo/data/ packages/arbetsmiljo/data/
 
 ENV PORT=3000

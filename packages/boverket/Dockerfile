@@ -5,36 +5,42 @@ RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt
 
 WORKDIR /build
 
-COPY package.json package-lock.json* ./
+# Copy package files for dependency resolution
+COPY package.json package-lock.json ./
 COPY packages/core/package.json packages/core/package.json
 COPY packages/boverket/package.json packages/boverket/package.json
 
-RUN npm install --workspace=packages/core --workspace=packages/boverket
+# Install all dependencies (hoisted to root node_modules)
+RUN npm ci
 
+# Copy source and build
 COPY tsconfig.base.json ./
 COPY packages/core/ packages/core/
-COPY packages/boverket/ packages/boverket/
+COPY packages/boverket/tsconfig.json packages/boverket/tsconfig.json
+COPY packages/boverket/src/ packages/boverket/src/
 
-RUN npm run build --workspace=packages/core && \
-    npm run build --workspace=packages/boverket
+RUN npm run build -w packages/core && npm run build -w packages/boverket
 
 # ---------- production ----------
 FROM node:20-slim
 
+RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 RUN groupadd -r nodejs && useradd -r -g nodejs nodejs
 
 WORKDIR /app
 
+# Install production dependencies
+COPY package.json package-lock.json ./
+COPY packages/core/package.json packages/core/package.json
+COPY packages/boverket/package.json packages/boverket/package.json
+RUN npm ci --omit=dev && npm cache clean --force && \
+    apt-get purge -y python3 make g++ && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
+# Copy built output
 COPY --from=builder /build/packages/core/dist/ packages/core/dist/
-COPY --from=builder /build/packages/core/package.json packages/core/package.json
 COPY --from=builder /build/packages/boverket/dist/ packages/boverket/dist/
-COPY --from=builder /build/packages/boverket/package.json packages/boverket/package.json
 
-COPY --from=builder /build/package.json ./
-COPY --from=builder /build/node_modules/ node_modules/
-COPY --from=builder /build/packages/core/node_modules/ packages/core/node_modules/
-COPY --from=builder /build/packages/boverket/node_modules/ packages/boverket/node_modules/
-
+# Copy data (database built during CI ingestion step)
 COPY packages/boverket/data/ packages/boverket/data/
 
 ENV PORT=3000
