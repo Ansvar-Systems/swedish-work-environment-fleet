@@ -17,26 +17,15 @@ export const CONFIG: AgencyConfig = {
 };
 
 /**
- * Boverket API configuration.
+ * Boverket REST API — fully open, no auth required.
  *
- * The old HTML listing at /sv/lag--ratt/forfattningssamling/ was removed.
- * Boverket now hosts regulations on a Blazor Server app at
- * forfattningssamling.boverket.se, which cannot be scraped via HTTP fetch
- * (all content is rendered via SignalR WebSocket).
+ * Endpoints:
+ *   GET /v1/forfattningar                    — list + filter by type, BFS number, title, status
+ *   GET /v1/forfattningar/{id}               — single regulation metadata
+ *   GET /v1/forfattningar/{id}/innehall      — structured JSON content (sections, paragraphs, prescriptions, advice)
+ *   GET /v1/forfattningar/{id}/innehall/html — rendered HTML content
+ *   GET /v1/forfattningar/sok?text=...       — fulltext search across all regulations
  *
- * Boverket provides a free REST API documented at:
- *   https://api-portal.boverket.se/reference#api=azu004-digitala-forfattningar
- *   PDF docs: https://www.boverket.se/contentassets/565a41dc66a24bcb9ce29b728135fdd8/
- *     anvandarvillkor-och-teknisk-beskrivning---api-tjanst-for-boverkets-forfattningssamling.pdf
- *
- * API endpoints (require subscription key from api-portal.boverket.se):
- *   GET /forfattningar              — list all regulations (supports ?upphavd=nej for in-force only)
- *   GET /forfattningar/{id}         — single regulation metadata
- *   GET /forfattningar/{id}/innehall — structured content (sections)
- *   GET /forfattningar/{id}/innehall/html — HTML content
- *   GET /forfattningar/sok?text=X   — full-text search
- *
- * Set BOVERKET_API_KEY env var to enable API-based ingestion.
+ * 449 total regulations, 137 active, 71 with structured fulltext.
  */
-export const BOVERKET_API_BASE = 'https://api.boverket.se';
-export const BOVERKET_API_KEY = process.env.BOVERKET_API_KEY ?? '';
+export const BOVERKET_API_BASE = 'https://api.boverket.se/forfattningssamling/v1';

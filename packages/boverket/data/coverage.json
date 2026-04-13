@@ -1,0 +1,14 @@
+{
+  "jurisdiction": "SE",
+  "agency": "Boverket",
+  "gazette": "BFS",
+  "total_regulations": 137,
+  "in_force": 137,
+  "regulations_with_content": 49,
+  "repealed": 0,
+  "total_sections": 17029,
+  "total_definitions": 0,
+  "total_cross_references": 748,
+  "source_url": "https://api.boverket.se/forfattningssamling/v1/forfattningar",
+  "generated_at": "2026-04-13T04:05:46.350Z"
+}
