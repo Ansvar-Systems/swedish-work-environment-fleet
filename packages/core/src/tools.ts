@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { z } from 'zod';
 import type { AgencyConfig } from './types.js';
 import { buildMeta } from './metadata.js';
 import { buildRegulationCitation, buildSectionCitation } from './citation.js';
@@ -14,6 +15,43 @@ import {
   regulationCount,
   sectionCount,
 } from './db.js';
+
+// ---------------------------------------------------------------------------
+// Zod input schemas
+// ---------------------------------------------------------------------------
+
+const SearchRegulationsInput = z.object({
+  query: z.string().min(1),
+  status: z.enum(['in_force', 'repealed', 'amended']).optional(),
+  subject_area: z.string().optional(),
+  limit: z.number().min(1).max(50).optional(),
+});
+
+const GetRegulationInput = z.object({
+  regulation_id: z.string().min(1),
+});
+
+const GetSectionInput = z.object({
+  section_id: z.string().min(1),
+});
+
+const ListRegulationsInput = z.object({
+  status: z.enum(['in_force', 'repealed', 'amended']).optional(),
+  subject_area: z.string().optional(),
+  page: z.number().min(1).optional(),
+});
+
+const SearchDefinitionsInput = z.object({
+  query: z.string().min(1),
+});
+
+const GetCrossRefsInput = z.object({
+  regulation_id: z.string().min(1),
+});
+
+const ValidateCitationInput = z.object({
+  citation: z.string().min(1),
+});
 
 // ---------------------------------------------------------------------------
 // Tool definitions (MCP protocol format)
@@ -167,6 +205,15 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       properties: {},
     },
   },
+  {
+    name: 'check_data_freshness',
+    description:
+      'Check data freshness — when was the database last ingested, and is it stale?',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -191,21 +238,21 @@ export function createToolHandlers(
 
   return {
     search_regulations(args) {
-      const query = args.query as string;
-      const limit = Math.min(Math.max((args.limit as number) || 20, 1), 100);
+      const parsed = SearchRegulationsInput.parse(args);
+      const limit = Math.min(parsed.limit ?? 20, 100);
 
-      let results = ftsSearch(db, query, limit);
+      let results = ftsSearch(db, parsed.query, limit);
 
       // Optional filters applied post-search
-      if (args.status) {
-        const status = args.status as string;
+      if (parsed.status) {
+        const status = parsed.status;
         results = results.filter((r) => {
           const reg = getRegulation(db, r.regulation_id);
           return reg?.status === status;
         });
       }
-      if (args.subject_area) {
-        const area = args.subject_area as string;
+      if (parsed.subject_area) {
+        const area = parsed.subject_area;
         results = results.filter((r) => {
           const reg = getRegulation(db, r.regulation_id);
           return reg?.subject_area === area;
@@ -235,13 +282,13 @@ export function createToolHandlers(
     },
 
     get_regulation(args) {
-      const id = args.regulation_id as string;
-      const reg = getRegulation(db, id);
+      const parsed = GetRegulationInput.parse(args);
+      const reg = getRegulation(db, parsed.regulation_id);
       if (!reg) {
-        return { error: 'not_found', message: `Regulation "${id}" not found.` };
+        return { error: 'not_found', _error_type: 'not_found', message: `Regulation "${parsed.regulation_id}" not found.`, _meta: meta() };
       }
 
-      const sections = getRegulationSections(db, id);
+      const sections = getRegulationSections(db, parsed.regulation_id);
       const tableOfContents = sections.map((s) => ({
         id: s.id,
         section_type: s.section_type,
@@ -263,10 +310,10 @@ export function createToolHandlers(
     },
 
     get_section(args) {
-      const id = args.section_id as string;
-      const sec = getSection(db, id);
+      const parsed = GetSectionInput.parse(args);
+      const sec = getSection(db, parsed.section_id);
       if (!sec) {
-        return { error: 'not_found', message: `Section "${id}" not found.` };
+        return { error: 'not_found', _error_type: 'not_found', message: `Section "${parsed.section_id}" not found.`, _meta: meta() };
       }
 
       return {
@@ -290,21 +337,19 @@ export function createToolHandlers(
     },
 
     list_regulations(args) {
-      const page = Math.max((args.page as number) || 1, 1);
+      const parsed = ListRegulationsInput.parse(args);
+      const page = parsed.page ?? 1;
       const limit = 100;
       const offset = (page - 1) * limit;
 
-      const status = args.status as string | undefined;
-      const subjectArea = args.subject_area as string | undefined;
-
       const rows = listRegulations(db, {
-        status,
-        subject_area: subjectArea,
+        status: parsed.status,
+        subject_area: parsed.subject_area,
         limit,
         offset,
       });
 
-      const total = regulationCount(db, status);
+      const total = regulationCount(db, parsed.status);
 
       return {
         page,
@@ -321,8 +366,8 @@ export function createToolHandlers(
     },
 
     search_definitions(args) {
-      const query = args.query as string;
-      const defs = getDefinitions(db, query);
+      const parsed = SearchDefinitionsInput.parse(args);
+      const defs = getDefinitions(db, parsed.query);
 
       return {
         results_count: defs.length,
@@ -337,18 +382,20 @@ export function createToolHandlers(
     },
 
     get_cross_references(args) {
-      const regulationId = args.regulation_id as string;
+      const parsed = GetCrossRefsInput.parse(args);
 
       // Verify regulation exists
-      const reg = getRegulation(db, regulationId);
+      const reg = getRegulation(db, parsed.regulation_id);
       if (!reg) {
         return {
           error: 'not_found',
-          message: `Regulation "${regulationId}" not found.`,
+          _error_type: 'not_found',
+          message: `Regulation "${parsed.regulation_id}" not found.`,
+          _meta: meta(),
         };
       }
 
-      const refs = getCrossReferences(db, regulationId);
+      const refs = getCrossReferences(db, parsed.regulation_id);
 
       // Group by target_type
       const grouped: Record<string, Array<{ target_id: string; target_label: string | null; source_section_id: string }>> = {};
@@ -364,7 +411,7 @@ export function createToolHandlers(
       }
 
       return {
-        regulation_id: regulationId,
+        regulation_id: parsed.regulation_id,
         total: refs.length,
         by_type: grouped,
         _meta: meta(),
@@ -372,10 +419,10 @@ export function createToolHandlers(
     },
 
     validate_citation(args) {
-      const citation = args.citation as string;
+      const parsed = ValidateCitationInput.parse(args);
 
       // Try as regulation ID first
-      const reg = getRegulation(db, citation);
+      const reg = getRegulation(db, parsed.citation);
       if (reg) {
         return {
           valid: true,
@@ -388,7 +435,7 @@ export function createToolHandlers(
       }
 
       // Try as section ID
-      const sec = getSection(db, citation);
+      const sec = getSection(db, parsed.citation);
       if (sec) {
         return {
           valid: true,
@@ -402,8 +449,9 @@ export function createToolHandlers(
 
       return {
         valid: false,
-        citation,
-        message: `No regulation or section found for "${citation}".`,
+        _error_type: 'not_found',
+        citation: parsed.citation,
+        message: `No regulation or section found for "${parsed.citation}".`,
         _meta: meta(),
       };
     },
@@ -450,6 +498,40 @@ export function createToolHandlers(
         },
         last_ingest: lastIngest ?? null,
         source_url: config.sourceUrl,
+        network: {
+          name: 'Ansvar MCP Network',
+          directory: 'https://ansvar.ai/mcp',
+          total_servers: 300,
+        },
+        _meta: meta(),
+      };
+    },
+
+    check_data_freshness() {
+      const lastIngest = getMetadata(db, 'last_ingest');
+      const agency = getMetadata(db, 'agency');
+      const thresholdDays = 45;
+
+      let fresh = true;
+      let daysSince = 0;
+
+      if (lastIngest) {
+        const ingestDate = new Date(lastIngest);
+        const now = new Date();
+        daysSince = Math.floor((now.getTime() - ingestDate.getTime()) / (1000 * 60 * 60 * 24));
+        fresh = daysSince <= thresholdDays;
+      } else {
+        fresh = false;
+        daysSince = -1;
+      }
+
+      return {
+        fresh,
+        last_ingest: lastIngest ?? null,
+        days_since: daysSince,
+        threshold_days: thresholdDays,
+        agency: agency ?? config.agency,
+        gazette: config.gazette,
         _meta: meta(),
       };
     },

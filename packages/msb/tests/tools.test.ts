@@ -34,7 +34,7 @@ describe('msb tool handlers', () => {
       statistics: { regulations: number };
       _meta: unknown;
     };
-    expect(result.agency).toBe('MSB');
+    expect(result.agency).toBe('MCF');
     expect(result.gazette).toBe('MSBFS');
     expect(result.server).toBe('swedish-emergency-preparedness-mcp');
     expect(result.statistics.regulations).toBeGreaterThan(0);

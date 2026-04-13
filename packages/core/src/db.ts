@@ -32,7 +32,6 @@ export interface DatabaseHandle {
 /** Open a read-only SQLite database at `path`. */
 export function openDatabase(path: string): DatabaseHandle {
   const instance = new Database(path, { readonly: true });
-  instance.pragma('journal_mode = WAL');
   return {
     instance,
     close() {

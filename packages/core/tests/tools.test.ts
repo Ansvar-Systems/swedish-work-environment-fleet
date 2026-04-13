@@ -18,8 +18,8 @@ const TEST_CONFIG: AgencyConfig = {
 };
 
 describe('TOOL_DEFINITIONS', () => {
-  it('has 9 tools', () => {
-    expect(TOOL_DEFINITIONS).toHaveLength(9);
+  it('has 10 tools', () => {
+    expect(TOOL_DEFINITIONS).toHaveLength(10);
   });
 });
 
@@ -60,11 +60,15 @@ describe('tool handlers', () => {
     expect(result._citation).toBeDefined();
   });
 
-  it('get_regulation returns error for unknown ID', () => {
+  it('get_regulation returns error with _meta for unknown ID', () => {
     const result = handlers.get_regulation({ regulation_id: 'NOPE-999' }) as {
       error: string;
+      _error_type: string;
+      _meta: unknown;
     };
     expect(result.error).toBe('not_found');
+    expect(result._error_type).toBe('not_found');
+    expect(result._meta).toBeDefined();
   });
 
   // --- get_section ----------------------------------------------------------
@@ -147,17 +151,66 @@ describe('tool handlers', () => {
 
   // --- about ----------------------------------------------------------------
 
-  it('about returns server metadata', () => {
+  it('about returns server metadata with network field', () => {
     const result = handlers.about({}) as {
       server: string;
       version: string;
       statistics: { regulations: number; sections: number };
+      network: { name: string; directory: string; total_servers: number };
       _meta: unknown;
     };
     expect(result.server).toBe('swedish-work-environment-mcp');
     expect(result.version).toBe('0.1.0');
     expect(result.statistics.regulations).toBeGreaterThan(0);
     expect(result.statistics.sections).toBeGreaterThan(0);
+    expect(result._meta).toBeDefined();
+    expect(result.network).toBeDefined();
+    expect(result.network.name).toBe('Ansvar MCP Network');
+    expect(result.network.total_servers).toBe(300);
+  });
+
+  // --- check_data_freshness -------------------------------------------------
+
+  it('check_data_freshness returns fresh status', () => {
+    const result = handlers.check_data_freshness({}) as {
+      fresh: boolean;
+      last_ingest: string | null;
+      days_since: number;
+      threshold_days: number;
+      agency: string;
+      gazette: string;
+      _meta: unknown;
+    };
+    expect(result.last_ingest).toBeDefined();
+    expect(result.threshold_days).toBe(45);
+    expect(result.agency).toBeDefined();
+    expect(result.gazette).toBe('AFS');
+    expect(result._meta).toBeDefined();
+    expect(typeof result.fresh).toBe('boolean');
+    expect(typeof result.days_since).toBe('number');
+  });
+
+  // --- error responses include _meta -----------------------------------------
+
+  it('get_section error includes _meta', () => {
+    const result = handlers.get_section({ section_id: 'NOPE-999/kap-1/p-1' }) as {
+      error: string;
+      _error_type: string;
+      _meta: unknown;
+    };
+    expect(result.error).toBe('not_found');
+    expect(result._error_type).toBe('not_found');
+    expect(result._meta).toBeDefined();
+  });
+
+  it('get_cross_references error includes _meta', () => {
+    const result = handlers.get_cross_references({ regulation_id: 'NOPE-999' }) as {
+      error: string;
+      _error_type: string;
+      _meta: unknown;
+    };
+    expect(result.error).toBe('not_found');
+    expect(result._error_type).toBe('not_found');
     expect(result._meta).toBeDefined();
   });
 });

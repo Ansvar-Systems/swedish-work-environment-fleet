@@ -317,6 +317,16 @@ async function main(): Promise<void> {
     total_cross_references: totalCrossRefs,
     source_url: CONFIG.indexUrl,
     generated_at: now,
+    scope_statement: `${CONFIG.gazette} regulations from ${CONFIG.agency}`,
+    scope_exclusions: ['Non-binding guidance (allmanna rad) may be partially included', 'SIS/IEC copyrighted standards excluded'],
+    sources: [{
+      name: CONFIG.agency,
+      url: CONFIG.sourceUrl,
+      expected_items: pages.length,
+      measurement_unit: 'regulations',
+      last_verified: now,
+      verification_method: 'automated_ingestion',
+    }],
   };
   fs.writeFileSync(COVERAGE_PATH, JSON.stringify(coverage, null, 2));
 
