@@ -1,0 +1,27 @@
+name: Trivy Container Scan
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  security-events: write
+  contents: read
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package: [arbetsmiljo, boverket, msb, folkhalsomyndigheten, stralsakerhet]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: packages/${{ matrix.package }}
+          format: sarif
+          output: trivy-${{ matrix.package }}.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-${{ matrix.package }}.sarif

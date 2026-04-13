@@ -5,6 +5,10 @@ on:
     - cron: '0 6 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   freshness:
     name: Freshness ${{ matrix.package }}
@@ -33,3 +37,16 @@ jobs:
         env:
           MAX_STALENESS_DAYS: '45'
         run: npm run freshness:check --workspace=packages/${{ matrix.package }}
+
+      - name: Create issue if stale
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Data staleness: ${{ matrix.package }}`,
+              body: `The ${{ matrix.package }} data is older than the staleness threshold.\n\nRun \`npm run ingest -w packages/${{ matrix.package }}\` to refresh.`,
+              labels: ['data-freshness']
+            });

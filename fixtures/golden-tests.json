@@ -1,0 +1,12 @@
+[
+  { "id": "health", "type": "health", "description": "Health endpoint returns OK", "assertions": { "http_status": 200 } },
+  { "id": "init", "type": "mcp_initialize", "description": "MCP handshake succeeds", "assertions": { "http_status": 200 } },
+  { "id": "search-regs", "type": "tool_call", "tool": "search_regulations", "input": { "query": "skydd" }, "description": "Search returns results", "assertions": { "result_not_empty": true, "min_results": 1, "meta_present": true } },
+  { "id": "list-regs", "type": "tool_call", "tool": "list_regulations", "input": {}, "description": "List returns regulations", "assertions": { "result_not_empty": true } },
+  { "id": "about", "type": "tool_call", "tool": "about", "input": {}, "description": "About returns metadata", "assertions": { "result_not_empty": true, "meta_present": true } },
+  { "id": "list-sources", "type": "tool_call", "tool": "list_sources", "input": {}, "description": "Sources returns data provenance", "assertions": { "result_not_empty": true, "meta_present": true } },
+  { "id": "freshness", "type": "tool_call", "tool": "check_data_freshness", "input": {}, "description": "Freshness check returns status", "assertions": { "result_not_empty": true } },
+  { "id": "search-empty", "type": "tool_call", "tool": "search_regulations", "input": { "query": "xyznonexistent999" }, "description": "Search with nonsense returns empty", "assertions": { "result_not_empty": false } },
+  { "id": "get-invalid", "type": "tool_call", "tool": "get_regulation", "input": { "regulation_id": "FAKE-9999-9" }, "description": "Get with invalid ID returns error", "assertions": { "result_not_empty": true } },
+  { "id": "validate-invalid", "type": "tool_call", "tool": "validate_citation", "input": { "citation": "FAKE-9999" }, "description": "Validate invalid citation returns false", "assertions": { "result_not_empty": true } }
+]
