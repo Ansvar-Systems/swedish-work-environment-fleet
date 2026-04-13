@@ -3,7 +3,8 @@
  * Ingestion script for Stralsakerhetsmyndigheten (SSMFS) regulations.
  *
  * Fetches the SSM regulation index, scrapes each regulation page,
- * and builds a SQLite database with FTS5 search.
+ * downloads regulation PDFs, extracts text, and builds a SQLite
+ * database with FTS5 search.
  *
  * Usage:
  *   npx tsx src/ingest.ts [--force] [--fetch-only] [--diff-only]
@@ -13,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import Database from 'better-sqlite3';
+import { PDFParse } from 'pdf-parse';
 import {
   initSchema,
   parseRegulationPage,
@@ -20,6 +22,7 @@ import {
   extractCrossReferences,
   stripHtml,
 } from '@ansvar/swe-fleet-core';
+import type { Section } from '@ansvar/swe-fleet-core';
 import { CONFIG } from './config.js';
 
 // ---------------------------------------------------------------------------
@@ -73,6 +76,202 @@ async function fetchPage(url: string): Promise<string> {
     throw new Error(`HTTP ${res.status} fetching ${url}`);
   }
   return res.text();
+}
+
+// ---------------------------------------------------------------------------
+// PDF fetching & text extraction
+// ---------------------------------------------------------------------------
+
+async function fetchPdf(url: string): Promise<Buffer> {
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'AnsvarMCP/0.1 (https://ansvar.eu; data-ingestion)',
+      'Accept': 'application/pdf',
+    },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status} fetching PDF ${url}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  const parser = new PDFParse({ data: new Uint8Array(buffer) });
+  const result = await parser.getText();
+  await parser.destroy();
+  return result.text;
+}
+
+/**
+ * Find the primary regulation PDF link on a landing page.
+ *
+ * SSM pages host PDFs under /contentassets/... with links in the HTML.
+ * We prefer links whose text or href contains "foreskrift" or the SSMFS
+ * number, and skip "vagledning" (guidance) documents.
+ */
+function findPdfLink(html: string, pageUrl: string): string | null {
+  const linkRegex = /<a[^>]+href=["']([^"']+\.pdf)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let match: RegExpExecArray | null;
+  const candidates: Array<{ url: string; text: string }> = [];
+
+  while ((match = linkRegex.exec(html)) !== null) {
+    const href = match[1];
+    const text = stripHtml(match[2]).toLowerCase();
+    const absoluteUrl = href.startsWith('http')
+      ? href
+      : new URL(href, pageUrl).toString();
+    candidates.push({ url: absoluteUrl, text });
+  }
+
+  if (candidates.length === 0) return null;
+
+  // Prefer the regulation PDF over guidance docs
+  const regulation = candidates.find(
+    (c) =>
+      (c.text.includes('föreskrift') || c.text.includes('foreskrift') || c.url.includes('ssmfs')) &&
+      !c.text.includes('vägledning') &&
+      !c.text.includes('vagledning'),
+  );
+  if (regulation) return regulation.url;
+
+  // Fall back to first non-guidance PDF
+  const nonGuidance = candidates.find(
+    (c) => !c.text.includes('vägledning') && !c.text.includes('vagledning'),
+  );
+  if (nonGuidance) return nonGuidance.url;
+
+  // Last resort: first PDF
+  return candidates[0].url;
+}
+
+/**
+ * Parse extracted PDF text into Section objects.
+ *
+ * Swedish regulations follow a structure of:
+ *   N kap. Chapter Title
+ *   N § Paragraph text...
+ *
+ * Some shorter regulations skip chapters entirely and go straight to
+ * numbered paragraphs.
+ */
+function parsePdfText(text: string, regulationId: string): Section[] {
+  const sections: Section[] = [];
+  let sortOrder = 0;
+  let currentChapterId: string | null = null;
+  let currentChapterNumber: string | null = null;
+
+  // Normalise line endings and collapse excessive whitespace runs
+  const normalised = text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+
+  // Split on chapter headings: "N kap. ..."
+  const chapterPattern = /^(\d+)\s+kap\.\s*(.*)/m;
+
+  // Check if the document uses chapters at all
+  const hasChapters = chapterPattern.test(normalised);
+
+  if (hasChapters) {
+    // Split the text at chapter boundaries, keeping the delimiter
+    const chapterParts = normalised.split(/(?=^\d+\s+kap\.)/m).filter((p) => p.trim());
+
+    for (const part of chapterParts) {
+      const chMatch = part.match(/^(\d+)\s+kap\.\s*(.*)/m);
+      if (chMatch) {
+        const chapterNum = chMatch[1];
+        const chapterTitle = chMatch[2].trim();
+        const chapterId = `${regulationId}/kap-${chapterNum}`;
+
+        sortOrder++;
+        sections.push({
+          id: chapterId,
+          regulation_id: regulationId,
+          section_type: 'chapter',
+          number: chapterNum,
+          title: chapterTitle || `${chapterNum} kap.`,
+          body: chapterTitle || `${chapterNum} kap.`,
+          parent_id: null,
+          sort_order: sortOrder,
+        });
+
+        currentChapterId = chapterId;
+        currentChapterNumber = chapterNum;
+
+        // Extract paragraphs within this chapter (text after the chapter heading)
+        const afterHeading = part.substring(chMatch[0].length);
+        sortOrder = extractPdfParagraphs(
+          afterHeading, regulationId, currentChapterId, currentChapterNumber, sections, sortOrder,
+        );
+      } else {
+        // Text before the first chapter — extract any paragraphs
+        sortOrder = extractPdfParagraphs(
+          part, regulationId, null, null, sections, sortOrder,
+        );
+      }
+    }
+  } else {
+    // No chapters — extract paragraphs directly from the full text
+    sortOrder = extractPdfParagraphs(
+      normalised, regulationId, null, null, sections, sortOrder,
+    );
+  }
+
+  // If we found no structured sections at all, create a single body section
+  // so the regulation is still searchable
+  if (sections.length === 0 && normalised.trim().length > 50) {
+    sections.push({
+      id: `${regulationId}/body`,
+      regulation_id: regulationId,
+      section_type: 'body',
+      number: null,
+      title: null,
+      body: normalised.trim(),
+      parent_id: null,
+      sort_order: 1,
+    });
+  }
+
+  return sections;
+}
+
+/**
+ * Extract numbered paragraphs (N §) from a block of PDF text.
+ * Returns the updated sort order.
+ */
+function extractPdfParagraphs(
+  text: string,
+  regulationId: string,
+  parentId: string | null,
+  chapterNumber: string | null,
+  sections: Section[],
+  startOrder: number,
+): number {
+  let order = startOrder;
+
+  // Split on paragraph markers: "N §" at start of line or after whitespace
+  const paraParts = text.split(/(?=(?:^|\n)\s*\d+\s*§)/).filter((p) => p.trim());
+
+  for (const part of paraParts) {
+    const paraMatch = part.match(/^\s*(\d+)\s*§\s*([\s\S]*)/);
+    if (!paraMatch) continue;
+
+    const paraNumber = paraMatch[1];
+    const body = paraMatch[2].trim();
+    if (!body) continue;
+
+    const chapterPart = chapterNumber ? `/kap-${chapterNumber}` : '';
+    const sectionId = `${regulationId}${chapterPart}/p-${paraNumber}`;
+
+    order++;
+    sections.push({
+      id: sectionId,
+      regulation_id: regulationId,
+      section_type: 'paragraf',
+      number: paraNumber,
+      title: null,
+      body: `${paraNumber} § ${body}`,
+      parent_id: parentId,
+      sort_order: order,
+    });
+  }
+
+  return order;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,21 +347,55 @@ async function main(): Promise<void> {
   const prevHashes = loadHashes();
   const newHashes: Record<string, string> = {};
 
-  const pages: Array<{ link: RegulationLink; html: string; changed: boolean }> = [];
+  const pages: Array<{
+    link: RegulationLink;
+    html: string;
+    pdfText: string | null;
+    changed: boolean;
+  }> = [];
 
-  for (const link of regulationLinks) {
-    console.log(`  Fetching ${link.id}: ${link.url}`);
+  for (let i = 0; i < regulationLinks.length; i++) {
+    const link = regulationLinks[i];
+    console.log(`  [${i + 1}/${regulationLinks.length}] Fetching ${link.id}: ${link.url}`);
     try {
       const html = await fetchPage(link.url);
       const hash = sha256(html);
       newHashes[link.id] = hash;
 
       const changed = FORCE || prevHashes[link.id] !== hash;
-      pages.push({ link, html, changed });
+
+      // Attempt to find and download the regulation PDF
+      let pdfText: string | null = null;
+      const pdfUrl = findPdfLink(html, link.url);
+
+      if (pdfUrl) {
+        console.log(`    Downloading PDF: ${pdfUrl.split('/').pop()}`);
+        try {
+          const pdfBuffer = await fetchPdf(pdfUrl);
+          pdfText = await extractPdfText(pdfBuffer);
+
+          if (!pdfText || pdfText.trim().length < 20) {
+            console.warn(`    WARNING: PDF text is empty or too short (likely scanned image) — falling back to HTML`);
+            pdfText = null;
+          } else {
+            console.log(`    Extracted ${pdfText.length} chars from PDF`);
+          }
+        } catch (pdfErr) {
+          console.warn(`    WARNING: PDF extraction failed: ${pdfErr instanceof Error ? pdfErr.message : pdfErr}`);
+          pdfText = null;
+        }
+      } else {
+        console.log(`    No PDF link found — using HTML scraper`);
+      }
+
+      pages.push({ link, html, pdfText, changed });
 
       if (!changed) {
         console.log(`    (unchanged)`);
       }
+
+      // Rate limit between fetches
+      await new Promise((r) => setTimeout(r, 500));
     } catch (err) {
       console.error(`    ERROR: ${err instanceof Error ? err.message : err}`);
     }
@@ -219,8 +452,11 @@ async function main(): Promise<void> {
   let totalDefinitions = 0;
   let totalCrossRefs = 0;
 
+  let pdfSuccessCount = 0;
+  let htmlFallbackCount = 0;
+
   const insertAll = db.transaction(() => {
-    for (const { link, html } of pages) {
+    for (const { link, html, pdfText } of pages) {
       insertReg.run({
         id: link.id,
         agency: CONFIG.agency,
@@ -241,13 +477,28 @@ async function main(): Promise<void> {
         fetched_at: now,
       });
 
-      const sections = parseRegulationPage(html, link.id);
+      // Use PDF-extracted sections if available, fall back to HTML scraper
+      let sections: Section[];
+      if (pdfText) {
+        sections = parsePdfText(pdfText, link.id);
+        pdfSuccessCount++;
+      } else {
+        sections = parseRegulationPage(html, link.id);
+        htmlFallbackCount++;
+      }
+
       for (const sec of sections) {
         insertSec.run(sec);
       }
       totalSections += sections.length;
 
-      const defs = extractDefinitions(html, link.id);
+      // Extract definitions and cross-references
+      // Use PDF text wrapped in pseudo-HTML if available, otherwise raw HTML
+      const contentForExtraction = pdfText
+        ? `<article><p>${pdfText.replace(/\n/g, '</p><p>')}</p></article>`
+        : html;
+
+      const defs = extractDefinitions(contentForExtraction, link.id);
       for (const def of defs) {
         insertDef.run({
           regulation_id: def.regulation_id,
@@ -260,7 +511,7 @@ async function main(): Promise<void> {
 
       // Only extract and insert cross-refs if we have sections
       if (sections.length > 0) {
-        const xrefs = extractCrossReferences(html, link.id);
+        const xrefs = extractCrossReferences(contentForExtraction, link.id);
         for (const xref of xrefs) {
           insertXref.run({
             source_section_id: sections[0].id,
@@ -324,6 +575,8 @@ async function main(): Promise<void> {
   console.log(`  Sections:    ${totalSections}`);
   console.log(`  Definitions: ${totalDefinitions}`);
   console.log(`  Cross-refs:  ${totalCrossRefs}`);
+  console.log(`  PDF source:  ${pdfSuccessCount} regulations`);
+  console.log(`  HTML fallback: ${htmlFallbackCount} regulations`);
   console.log(`  Database:    ${DB_PATH}`);
 }
 
