@@ -19,7 +19,7 @@
   "dependencies": {
     "@ansvar/swe-fleet-core": "*",
     "@modelcontextprotocol/sdk": "^1.12.0",
-    "better-sqlite3": "^11.0.0",
+    "better-sqlite3": "^12.11.1",
     "zod": "^3.23.0"
   },
   "devDependencies": {
